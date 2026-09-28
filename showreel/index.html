@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>upHill Showreel</title>
+<style>
+  @font-face { font-family: "PF"; src: url(assets/PlayfairDisplay-Bold.ttf); font-weight: 700; }
+  @font-face { font-family: "PF"; src: url(assets/PlayfairDisplay-Medium.ttf); font-weight: 500; }
+  @font-face { font-family: "PF"; src: url(assets/PlayfairDisplay-MediumItalic.ttf); font-weight: 500; font-style: italic; }
+  @font-face { font-family: "IN"; src: url(assets/Inter_18pt-Regular.ttf); font-weight: 400; }
+  @font-face { font-family: "IN"; src: url(assets/Inter_18pt-Medium.ttf); font-weight: 500; }
+  html, body { margin: 0; background: #111; }
+  canvas { display: block; width: 540px; height: 960px; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+/* ============================================================
+   upHill Value Marketing – Motion Showreel (9:16, 30 fps)
+   Deterministic: render(t) draws exactly the frame at time t.
+   ============================================================ */
+const W = 1080, H = 1920, FPS = 30, DUR = 29.5, VO = 0.6;
+const C = {
+  or: '#EF762E', orD: '#C05A15', orL: '#F59A5F', dark: '#1C1C1C', grey: '#4A4845',
+  logo: '#717071', beige: '#E8E4DF', cream: '#F0EDE9', white: '#FFFFFF',
+};
+const cv = document.getElementById('c');
+const out = cv.getContext('2d');
+const buf = document.createElement('canvas'); buf.width = W; buf.height = H;
+const ctx = buf.getContext('2d');
+let DATA = null, LOGO = null;
+
+/* ---------- math & easing ---------- */
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const E = {
+  lin: x => x,
+  inC: x => x * x * x,
+  outC: x => 1 - Math.pow(1 - x, 3),
+  outQ: x => 1 - Math.pow(1 - x, 5),
+  inOut: x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2,
+  inOutQ: x => x < .5 ? 16 * x ** 5 : 1 - Math.pow(-2 * x + 2, 5) / 2,
+  back: x => { const c1 = 1.9, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); },
+  elastic: x => x === 0 ? 0 : x === 1 ? 1 : Math.pow(2, -10 * x) * Math.sin((x * 10 - .75) * (2 * Math.PI / 3)) + 1,
+  expo: x => x === 1 ? 1 : 1 - Math.pow(2, -10 * x),
+};
+const ease = (t, a, b, fn = E.outC) => fn(prog(t, a, b));
+// damped spring impulse: 0 before t0, rings and settles
+const spring = (t, t0, freq = 3, damp = 5) => t < t0 ? 0 : Math.exp(-damp * (t - t0)) * Math.sin((t - t0) * freq * Math.PI * 2);
+function rand(i) { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+const V = s => s + VO; // voice time -> video time
+
+/* ---------- drawing helpers ---------- */
+function font(size, fam = 'PF', w = 700, it = false) { ctx.font = `${it ? 'italic ' : ''}${w} ${size}px ${fam}`; }
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function fillBg(c) { ctx.fillStyle = c; ctx.fillRect(0, 0, W, H); }
+function withT(x, y, rot, sx, sy, fn) { ctx.save(); ctx.translate(x, y); ctx.rotate(rot || 0); ctx.scale(sx ?? 1, sy ?? sx ?? 1); fn(); ctx.restore(); }
+
+// The logo's "uphill steps" bracket (orange L rotated), centred on 0,0
+function bracket(size, thick, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(-size / 2, -size / 2, size, thick);
+  ctx.fillRect(size / 2 - thick, -size / 2, thick, size);
+}
+
+// Kinetic headline: words = [{t, s, style}], each slides up out of a mask.
+function kinetic(lines, cx, y0, t, opt = {}) {
+  const lh = opt.lh || 1.12;
+  lines.forEach((line, li) => {
+    let total = 0; const ms = [];
+    line.forEach(w => { font(w.size || opt.size, w.fam || 'PF', w.w || 700, w.it); const m = ctx.measureText(w.s).width; ms.push(m); total += m; });
+    const sp = (opt.size || 100) * 0.26; total += sp * (line.length - 1);
+    let x = cx - total / 2;
+    const y = y0 + li * (opt.size || 100) * lh;
+    line.forEach((w, wi) => {
+      const size = w.size || opt.size;
+      const p = ease(t, w.t, w.t + (opt.dur || .45), E.outQ);
+      const pOut = opt.out ? ease(t, opt.out + wi * .03 + li * .05, opt.out + .35 + wi * .03 + li * .05, E.inC) : 0;
+      if (p > 0 && pOut < 1) {
+        ctx.save();
+        ctx.beginPath(); ctx.rect(x - 40, y - size * 1.1, ms[wi] + 80, size * 1.45); ctx.clip();
+        const dy = (1 - p) * size * 1.2 - pOut * size * 1.3;
+        const pop = 1 + spring(t, w.t + .1, 2.2, 7) * 0.06;
+        ctx.translate(x + ms[wi] / 2, y + dy);
+        ctx.rotate((1 - p) * 0.12);
+        ctx.scale(pop, pop);
+        font(size, w.fam || 'PF', w.w || 700, w.it);
+        ctx.fillStyle = w.c || opt.c; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+        ctx.fillText(w.s, 0, 0);
+        if (w.u) { // underline swipe
+          const up = ease(t, w.t + .25, w.t + .7, E.outQ);
+          ctx.fillStyle = C.or; ctx.fillRect(-ms[wi] / 2, size * .14, ms[wi] * up, size * .08);
+        }
+        ctx.restore();
+      }
+      x += ms[wi] + sp;
+    });
+  });
+}
+function label(s, x, y, size, c, align = 'center', w = 500, fam = 'IN', ls = 0) {
+  font(size, fam, w); ctx.fillStyle = c; ctx.textAlign = align; ctx.textBaseline = 'middle';
+  if (ls) ctx.letterSpacing = ls + 'px';
+  ctx.fillText(s, x, y); ctx.letterSpacing = '0px';
+}
+
+/* ---------- background grain & vignette ---------- */
+const grains = [];
+for (let g = 0; g < 6; g++) {
+  const c = document.createElement('canvas'); c.width = 540; c.height = 960;
+  const x = c.getContext('2d'); const id = x.createImageData(540, 960);
+  for (let i = 0; i < id.data.length; i += 4) { const v = rand(i * 0.37 + g * 999.1) * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 22; }
+  x.putImageData(id, 0, 0); grains.push(c);
+}
+
+/* ============================================================
+   CHARACTER: "Hilli" – a friendly mountain with an orange peak
+   ============================================================ */
+function mouthAt(t) {
+  if (!DATA) return 0;
+  const f = (t - VO) * FPS; const i = Math.floor(f);
+  if (i < 0 || i >= DATA.env.length - 1) return 0;
+  return lerp(DATA.env[i], DATA.env[i + 1], f - i);
+}
+function blinkAt(t) {
+  const blinks = [1.9, 5.4, 9.6, 13.3, 16.9, 20.4, 24.2, 27.8];
+  for (const b of blinks) { const d = Math.abs(t - b); if (d < .09) return 1 - d / .09; }
+  return 0;
+}
+// mood: {brow, smile, eye, lookX, lookY}, arms: {l, r} angle in rad (0 = down), wave
+function hilli(x, y, s, t, st) {
+  const m = mouthAt(t);
+  const bob = Math.sin(t * Math.PI * 2 * (120 / 60) / 2) * 6 + m * 6; // bob to 120bpm half-time
+  const squash = 1 + Math.sin(t * Math.PI * 2) * 0.012 + (st.squash || 0) - m * 0.02;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.beginPath(); ctx.ellipse(0, 8, 190 * (1 - bob / 200), 22, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.translate(0, -bob);
+  ctx.rotate(st.tilt || 0);
+  ctx.scale(1 / Math.sqrt(squash), squash);
+  // feet
+  ctx.fillStyle = C.dark;
+  [-70, 70].forEach((fx, i) => { rr(fx - 46, -22 + (i ? Math.sin(t * 6) * 2 : 0), 92, 36, 18); ctx.fill(); });
+  // arms (behind body)
+  const arm = (side, ang) => {
+    ctx.save(); ctx.translate(side * 128, -130); ctx.rotate(-side * ang);
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(side * 34, 60, side * 22, 130);
+    ctx.strokeStyle = C.dark; ctx.lineWidth = 36; ctx.stroke(); ctx.strokeStyle = st.bodyC || C.logo; ctx.lineWidth = 20; ctx.stroke();
+    ctx.fillStyle = C.cream; ctx.beginPath(); ctx.arc(side * 22, 138, 32, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = C.dark; ctx.lineWidth = 6; ctx.stroke();
+    ctx.restore();
+  };
+  // body: rounded mountain
+  const body = () => {
+    ctx.beginPath();
+    ctx.moveTo(-200, -8);
+    ctx.bezierCurveTo(-190, -60, -120, -250, -40, -360);
+    ctx.quadraticCurveTo(0, -410, 40, -360);
+    ctx.bezierCurveTo(120, -250, 190, -60, 200, -8);
+    ctx.quadraticCurveTo(0, 14, -200, -8);
+    ctx.closePath();
+  };
+  body(); ctx.fillStyle = st.bodyC || C.logo; ctx.fill();
+  ctx.save(); body(); ctx.clip();
+  // shading side
+  ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.beginPath(); ctx.moveTo(40, -420); ctx.lineTo(260, 20); ctx.lineTo(60, 20); ctx.quadraticCurveTo(80, -200, 10, -420); ctx.fill();
+  // orange peak cap (snow cap, brand orange), jagged edge
+  ctx.fillStyle = C.or; ctx.beginPath(); ctx.moveTo(-200, -440);
+  ctx.lineTo(200, -440); ctx.lineTo(200, -268);
+  const jag = [[120, -268], [88, -236], [52, -276], [16, -240], [-22, -282], [-58, -244], [-92, -276], [-130, -262]];
+  jag.forEach(([a, b]) => ctx.lineTo(a, b + Math.sin(t * 3 + a) * 2));
+  ctx.lineTo(-200, -262); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  body(); ctx.strokeStyle = C.dark; ctx.lineWidth = 9; ctx.stroke();
+  arm(-1, st.armL || 0.35); arm(1, st.armR || 0.35);
+  // face
+  const lx = (st.lookX || 0) * 10, ly = (st.lookY || 0) * 10;
+  const bl = blinkAt(t);
+  [-52, 52].forEach((ex, i) => {
+    const eh = 40 * (st.eye || 1) * (1 - bl * 0.92);
+    ctx.fillStyle = C.white; ctx.beginPath(); ctx.ellipse(ex, -170, 32, eh, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = C.dark; ctx.lineWidth = 6; ctx.stroke();
+    if (bl < .7) {
+      ctx.fillStyle = C.dark; ctx.beginPath(); ctx.ellipse(ex + lx, -164 + ly, 15, 17 * (1 - bl), 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(ex + lx + 5, -171 + ly, 5, 0, Math.PI * 2); ctx.fill();
+    }
+    // brows
+    const brow = st.brow || 0; const bs = i ? 1 : -1;
+    const raise = (st.browUp && i === 1) ? -18 : 0;
+    ctx.strokeStyle = C.dark; ctx.lineWidth = 9; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(ex - 24, -222 + raise - m * 6 + bs * brow * 10); ctx.lineTo(ex + 24, -222 + raise - m * 6 - bs * brow * 10); ctx.stroke();
+  });
+  // cheeks
+  ctx.fillStyle = 'rgba(239,118,46,0.35)';
+  [-92, 92].forEach(cx => { ctx.beginPath(); ctx.ellipse(cx, -118, 20, 12, 0, 0, Math.PI * 2); ctx.fill(); });
+  // mouth
+  const smile = st.smile ?? 1;
+  const mw = 42 + m * 10, mh = 6 + m * 46;
+  ctx.fillStyle = C.dark;
+  ctx.beginPath();
+  ctx.moveTo(-mw, -112 - smile * 8);
+  ctx.quadraticCurveTo(0, -112 + mh * 1.6 + smile * 10, mw, -112 - smile * 8);
+  ctx.quadraticCurveTo(0, -112 - smile * 2 + (m > .05 ? -mh * .15 : 6), -mw, -112 - smile * 8);
+  ctx.fill();
+  if (m > 0.2) { // tongue
+    ctx.save(); ctx.clip();
+    ctx.fillStyle = '#E0564F'; ctx.beginPath(); ctx.ellipse(0, -112 + mh * 1.1, 22, 14, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+/* ============================================================
+   SCENES — each draws a full frame for its local time
+   ============================================================ */
+const WORDS = () => DATA.words;
+const wt = i => V(DATA.words[i].s); // word start in video time
+// word indices (see words.json)
+// 0 Hey | 1 Du 2 machst 3 die 4 Welt 5 besser | 6 Aber 7 … 8 kommt 9 das 10 auch 11 an?
+// 12 Gute 13 Arbeit 14 die 15 keiner 16 sieht | 17 Eine 18 Botschaft 19 die 20 verpufft
+// 21 Genau 22 da 23 setzt 24 upHill 25 Value 26 Marketing 27 an 28 – 29 mit 30 drei 31 Hebeln
+// 32 Werte 33 Finde 34 die 35 Menschen 36 die 37 so 38 ticken 39 wie 40 Du
+// 41 Worte 42 Sag's 43 klar 44 überzeugend 45 und 46 menschlich
+// 47 Website 48 Mach 49 Deine 50 Marke 51 sichtbar 52 und 53 erlebbar
+// 54 Für 55 Organisationen 56 mit 57 Haltung 58 Mach 59 Deinen 60 Impact 61 deutlich 62 – 63 lass 64 uns 65 kennenlernen
+
+/* --- Scene 1: Intro + "Du machst die Welt besser" --- */
+function sceneIntro(t) {
+  fillBg(C.dark);
+  // radial warm glow
+  const g = ctx.createRadialGradient(W / 2, 760, 50, W / 2, 760, 900);
+  g.addColorStop(0, 'rgba(239,118,46,0.22)'); g.addColorStop(1, 'rgba(28,28,28,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // intro sting: two brackets slam together then fly apart
+  const a = ease(t, 0, .42, E.inOutQ);
+  const fly = ease(t, .55, 1.1, E.inC);
+  if (fly < 1) {
+    withT(W / 2 - 150 * (1 - a) - 600 * fly, 760 + 150 * (1 - a) + 600 * fly, 0, 1 + spring(t, .42, 3, 8) * .2, null, () => bracket(300, 64, C.or));
+    withT(W / 2 + 90 + 150 * (1 - a) + 600 * fly, 670 - 150 * (1 - a) - 600 * fly, 0, 1 + spring(t, .42, 3, 8) * .2, null, () => bracket(300, 64, C.or));
+  }
+  // flash ring on impact
+  const r = ease(t, .42, 1.0, E.outQ);
+  if (t > .42 && r < 1) { ctx.strokeStyle = `rgba(239,118,46,${1 - r})`; ctx.lineWidth = 40 * (1 - r); ctx.beginPath(); ctx.arc(W / 2, 720, 100 + r * 800, 0, Math.PI * 2); ctx.stroke(); }
+  // globe (line art) grows after "Welt"
+  const gp = ease(t, wt(4) - .2, wt(4) + .6, E.back);
+  if (gp > 0) {
+    ctx.save(); ctx.translate(W / 2, 470); ctx.scale(gp, gp);
+    ctx.strokeStyle = C.or; ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.arc(0, 0, 170, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(239,118,46,0.75)';
+    for (let k = 0; k < 5; k++) { const ph = (t * .6 + k / 5) % 1; const rx = Math.cos(ph * Math.PI) * 170; ctx.beginPath(); ctx.ellipse(0, 0, Math.abs(rx), 170, 0, 0, Math.PI * 2); ctx.stroke(); }
+    [-.5, 0, .5].forEach(k => { ctx.beginPath(); ctx.ellipse(0, k * 170, 170 * Math.sqrt(1 - k * k), 26 * Math.sqrt(1 - k * k), 0, 0, Math.PI * 2); ctx.stroke(); });
+    // orbiting sparkles
+    for (let k = 0; k < 6; k++) { const an = t * 1.4 + k * 1.05; ctx.fillStyle = C.cream; ctx.beginPath(); ctx.arc(Math.cos(an) * 250, Math.sin(an) * 70 - 20, 7 + 3 * Math.sin(t * 5 + k), 0, Math.PI * 2); ctx.fill(); }
+    ctx.restore();
+  }
+  // "Hey!" burst
+  const hp = ease(t, wt(0) - .05, wt(0) + .35, E.back), ho = ease(t, wt(1) - .2, wt(1) + .1, E.inC);
+  if (hp > 0 && ho < 1) withT(W / 2, 700, -0.08, hp * (1 - ho), null, () => { font(230, 'PF', 700, true); ctx.fillStyle = C.or; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('Hey!', 0, 0); });
+  kinetic([
+    [{ s: 'Du', t: wt(1) }, { s: 'machst', t: wt(2) }],
+    [{ s: 'die', t: wt(3) }, { s: 'Welt', t: wt(4), c: C.or, it: true, w: 500 }],
+    [{ s: 'besser.', t: wt(5), u: 1 }],
+  ], W / 2, 810, t, { size: 128, c: C.cream, out: 3.0 });
+}
+
+/* --- Scene 2: "Aber … kommt das auch an?" --- */
+function sceneQuestion(t) {
+  fillBg(C.dark);
+  // signal arcs that break up
+  for (let k = 0; k < 5; k++) {
+    const ph = ((t - 2.6) * .9 + k * .2) % 1; if (t < 2.6) continue;
+    const r = 80 + ph * 520; const glitch = rand(Math.floor(t * 12) + k) > .55;
+    ctx.strokeStyle = `rgba(239,118,46,${(1 - ph) * (glitch ? .15 : .7)})`; ctx.lineWidth = 12;
+    ctx.setLineDash(glitch ? [18, 34] : []);
+    ctx.beginPath(); ctx.arc(W / 2, 1320, r, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  // giant question mark
+  const qp = ease(t, wt(11) - .1, wt(11) + .5, E.back);
+  if (qp > 0) {
+    const wob = spring(t, wt(11) + .3, 1.8, 3) * .25;
+    withT(W - 160, 330, wob + .12, qp, null, () => { font(420, 'PF', 700, true); ctx.fillStyle = C.or; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.globalAlpha = .95; ctx.fillText('?', 0, 0); });
+  }
+  const shake = t > wt(11) ? spring(t, wt(11) + .05, 9, 9) * 18 : 0;
+  ctx.save(); ctx.translate(shake, 0);
+  kinetic([
+    [{ s: 'Aber…', t: wt(6), size: 90, c: C.logo, w: 500, it: true }],
+    [{ s: 'kommt', t: wt(8) }, { s: 'das', t: wt(9) }],
+    [{ s: 'auch', t: wt(10) }, { s: 'an?', t: wt(11), c: C.or }],
+  ], W / 2 - 40, 560, t, { size: 150, c: C.cream, lh: 1.05 });
+  ctx.restore();
+}
+
+/* --- Scene 3: pain points that nobody sees, then "verpufft" --- */
+const PAINS = ['Botschaft geht verloren', 'Team spricht anders', 'Zielgruppe unklar', 'Themen zu komplex', 'Wenig Wirkung', 'Vertrauen fehlt'];
+function scenePain(t) {
+  fillBg('#262524');
+  // faint grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 2;
+  for (let x = 0; x < W; x += 90) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = 0; y < H; y += 90) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  kinetic([
+    [{ s: 'Gute', t: wt(12) }, { s: 'Arbeit,', t: wt(13) }],
+    [{ s: 'die', t: wt(14), c: C.logo }, { s: 'keiner', t: wt(15), c: C.logo }, { s: 'sieht.', t: wt(16), c: C.logo }],
+  ], W / 2, 250, t, { size: 110, c: C.cream, out: wt(17) - .15 });
+  kinetic([
+    [{ s: 'Eine', t: wt(17) }, { s: 'Botschaft,', t: wt(18) }],
+    [{ s: 'die', t: wt(19), c: C.logo }, { s: 'verpufft.', t: wt(20), c: C.or, it: true, w: 500 }],
+  ], W / 2, 250, t, { size: 110, c: C.cream });
+  const poofT = wt(20) + .15;
+  PAINS.forEach((p, i) => {
+    const t0 = wt(12) + i * .32;
+    const pin = ease(t, t0, t0 + .5, E.back);
+    if (pin <= 0) return;
+    const col = i % 2, row = Math.floor(i / 2);
+    const x = 290 + col * 500, y = 560 + row * 175;
+    const rot = (rand(i + 4) - .5) * .12;
+    const fade = t > wt(14) ? .35 + .65 * (1 - ease(t, wt(14), wt(16) + .3)) : 1; // "die keiner sieht" -> cards fade to invisible
+    if (t < poofT) {
+      withT(x, y - (1 - pin) * 200, rot * pin + (1 - pin) * .4, lerp(.6, 1, pin), null, () => {
+        ctx.globalAlpha = fade;
+        rr(-230, -62, 460, 124, 26); ctx.fillStyle = '#3A3937'; ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.fillStyle = C.or; ctx.beginPath(); ctx.arc(-172, 0, 24, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = C.dark; ctx.lineWidth = 6; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(-182, -10); ctx.lineTo(-162, 10); ctx.moveTo(-162, -10); ctx.lineTo(-182, 10); ctx.stroke();
+        label(p, -132, 2, 36, C.cream, 'left', 500);
+        ctx.globalAlpha = 1;
+      });
+    } else {
+      // disintegrate into particles drifting up-right
+      const k = t - poofT;
+      for (let j = 0; j < 46; j++) {
+        const px = x + (rand(i * 97 + j) - .5) * 460, py = y + (rand(i * 31 + j * 7) - .5) * 124;
+        const d = clamp(k * 1.4 - rand(j * 3 + i) * .4);
+        if (d >= 1) continue;
+        const dx = (rand(j + i * 5) - .2) * 420 * E.outC(d), dy = -(rand(j * 9 + i) * 380 + 80) * E.outC(d);
+        ctx.fillStyle = j % 3 ? `rgba(240,237,233,${(1 - d) * .8})` : `rgba(239,118,46,${1 - d})`;
+        const s = (1 - d) * (6 + rand(j * 13 + i) * 10);
+        ctx.fillRect(px + dx, py + dy, s, s);
+      }
+    }
+  });
+}
+
+/* --- Scene 4: brand reveal + "drei Hebel" --- */
+function sceneBrand(t) {
+  fillBg(C.or);
+  // rising stair brackets pattern (uphill motif)
+  for (let i = 0; i < 9; i++) {
+    const tt = (t * .5 + i / 9) % 1;
+    const x = -100 + tt * 1300, y = 1900 - tt * 1300 - (i % 3) * 180;
+    withT(x, y, 0, .6 + (i % 3) * .2, null, () => bracket(180, 38, 'rgba(255,255,255,0.13)'));
+  }
+  // logo card
+  const lp = ease(t, wt(24) - .15, wt(24) + .45, E.back);
+  const lOut = ease(t, wt(29) - .1, wt(29) + .35, E.inOutQ);
+  if (lp > 0) {
+    const s = lp * (1 + spring(t, wt(24) + .1, 2.5, 6) * .05);
+    const y = lerp(560, 330, lOut);
+    withT(W / 2, y, (1 - lp) * -.2, s * lerp(1, .62, lOut), null, () => {
+      rr(-400, -250, 800, 500, 48); ctx.fillStyle = C.white; ctx.fill();
+      ctx.shadowColor = 'transparent';
+      if (LOGO) ctx.drawImage(LOGO, -330, -222, 660, 443);
+    });
+  }
+  // "Genau da setzt …" small line
+  const gp = ease(t, wt(21), wt(21) + .4, E.outQ), go = ease(t, wt(24) - .3, wt(24), E.inC);
+  if (gp > 0 && go < 1) {
+    ctx.globalAlpha = gp * (1 - go);
+    kinetic([[{ s: 'Genau', t: wt(21) }, { s: 'da', t: wt(22) }, { s: 'setzt…', t: wt(23) }]], W / 2, 560, t, { size: 130, c: C.white });
+    ctx.globalAlpha = 1;
+  }
+  // three levers
+  if (t > wt(29) - .2) {
+    const np = ease(t, wt(30) - .1, wt(30) + .4, E.back);
+    withT(W / 2, 760, 0, np, null, () => {
+      font(120, 'PF', 700, true); ctx.fillStyle = C.white; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('3 Hebel', 0, 0);
+    });
+    ['Werte', 'Worte', 'Website'].forEach((w, i) => {
+      const t0 = wt(31) + i * .12;
+      const p = ease(t, t0 - .1, t0 + .45, E.back);
+      const h = 120 + i * 90;
+      const x = W / 2 + (i - 1) * 270, base = 1260;
+      if (p <= 0) return;
+      ctx.fillStyle = C.dark; rr(x - 95, base - h * p, 190, h * p, 22); ctx.fill();
+      // lever knob
+      ctx.save(); ctx.translate(x, base - h * p); ctx.rotate(-.5 + p * .5 + spring(t, t0 + .3, 2, 5) * .3);
+      ctx.strokeStyle = C.white; ctx.lineWidth = 14; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -90); ctx.stroke();
+      ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(0, -96, 26, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+      ctx.globalAlpha = p > .5 ? 1 : p * 2;
+      label(w, x, base + 50, 40, C.dark, 'center', 500);
+      ctx.globalAlpha = 1;
+    });
+  }
+}
+
+/* --- Scene 5: WERTE – people with the same values find each other --- */
+function sceneWerte(t) {
+  fillBg(C.beige);
+  const t0 = wt(32);
+  label('01', 120, 190, 40, C.or, 'left', 500, 'IN', 6);
+  ctx.fillStyle = C.or; ctx.fillRect(190, 188, ease(t, t0, t0 + .5) * 120, 4);
+  kinetic([[{ s: 'Werte', t: t0, u: 1 }]], W / 2, 400, t, { size: 190, c: C.dark });
+  const gather = ease(t, wt(35) - .1, wt(38) + .3, E.inOutQ);
+  const cx = W / 2, cy = 840;
+  for (let i = 0; i < 42; i++) {
+    const match = i % 3 === 0;
+    const ax = 110 + rand(i * 3.1) * 860, ay = 560 + rand(i * 7.7) * 560;
+    let x = ax + Math.sin(t * 1.3 + i) * 10, y = ay + Math.cos(t * 1.1 + i * 2) * 10;
+    if (match) {
+      // heart shape target
+      const k = Math.floor(i / 3) / 14 * Math.PI * 2;
+      const hx = 16 * Math.pow(Math.sin(k), 3), hy = -(13 * Math.cos(k) - 5 * Math.cos(2 * k) - 2 * Math.cos(3 * k) - Math.cos(4 * k));
+      const gi = ease(gather, i / 42 * .3, i / 42 * .3 + .7, E.outC);
+      x = lerp(x, cx + hx * 15, gi); y = lerp(y, cy + hy * 15, gi);
+    } else {
+      const push = gather * 60; const dx = ax - cx, dy = ay - cy, d = Math.hypot(dx, dy) || 1;
+      x += dx / d * push; y += dy / d * push;
+    }
+    const pin = ease(t, t0 - .3 + rand(i) * .5, t0 + .2 + rand(i) * .5, E.back);
+    if (pin <= 0) continue;
+    const col = match ? (gather > .1 ? C.or : C.logo) : 'rgba(74,72,69,' + (1 - gather * .6) + ')';
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(x, y - 22 * pin, 15 * pin, 0, Math.PI * 2); ctx.fill(); // head
+    rr(x - 18 * pin, y - 2 * pin, 36 * pin, 30 * pin, 14 * pin); ctx.fill(); // body
+  }
+  // pulse ring around heart once formed
+  const pr = ease(t, wt(40), wt(40) + .8, E.outQ);
+  if (pr > 0 && pr < 1) { ctx.strokeStyle = `rgba(239,118,46,${1 - pr})`; ctx.lineWidth = 10; ctx.beginPath(); ctx.arc(cx, cy, 260 + pr * 250, 0, Math.PI * 2); ctx.stroke(); }
+  const tp = ease(t, wt(38), wt(38) + .5, E.outQ);
+  ctx.globalAlpha = tp; label('Zielgruppe  ·  Positionierung  ·  Haltung', W / 2, 1210 + (1 - tp) * 30, 38, C.grey, 'center', 500); ctx.globalAlpha = 1;
+}
+
+/* --- Scene 6: WORTE – speech bubble with the right words --- */
+function sceneWorte(t) {
+  fillBg(C.dark);
+  const t0 = wt(41);
+  label('02', 120, 190, 40, C.or, 'left', 500, 'IN', 6);
+  ctx.fillStyle = C.or; ctx.fillRect(190, 188, ease(t, t0, t0 + .5) * 120, 4);
+  kinetic([[{ s: 'Worte', t: t0, u: 1 }]], W / 2, 400, t, { size: 190, c: C.cream });
+  // floating wording chips
+  const chips = ['Markenbotschaft', 'Wording Guide', 'Pitch Training', 'Kommunikation', 'Deep Talk'];
+  chips.forEach((c, i) => {
+    const p = ease(t, t0 + .3 + i * .15, t0 + .8 + i * .15, E.back);
+    if (p <= 0) return;
+    const x = [220, 800, 190, 860, 540][i] + Math.sin(t * 1.2 + i) * 14;
+    const y = [560, 590, 1130, 1110, 1230][i] + Math.cos(t + i * 2) * 12;
+    withT(x, y, (i % 2 ? .06 : -.06), p, null, () => {
+      font(34, 'IN', 500); const w = ctx.measureText(c).width + 60;
+      rr(-w / 2, -34, w, 68, 34); ctx.strokeStyle = 'rgba(239,118,46,0.9)'; ctx.lineWidth = 3; ctx.stroke();
+      label(c, 0, 2, 34, C.cream);
+    });
+  });
+  // speech bubble
+  const bp = ease(t, wt(42) - .2, wt(42) + .3, E.back);
+  if (bp > 0) {
+    withT(W / 2, 850, 0, bp, null, () => {
+      rr(-380, -190, 760, 380, 60); ctx.fillStyle = C.cream; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-40, 185); ctx.lineTo(-10, 290); ctx.lineTo(60, 185); ctx.fill();
+      const items = [['klar.', wt(43)], ['überzeugend.', wt(44)], ['menschlich.', wt(46)]];
+      items.forEach(([s, ts], i) => {
+        const p = ease(t, ts - .05, ts + .35, E.outQ);
+        if (p <= 0) return;
+        const y = -100 + i * 100;
+        // typewriter reveal
+        font(72, 'PF', i === 2 ? 500 : 700, i === 2); const full = ctx.measureText(s).width;
+        ctx.save(); ctx.beginPath(); ctx.rect(-250, y - 60, full * p + 10, 110); ctx.clip();
+        ctx.fillStyle = i === 2 ? C.or : C.dark; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(s, -250, y); ctx.restore();
+        // cursor
+        if (p < 1) { ctx.fillStyle = C.or; ctx.fillRect(-250 + full * p + 8, y - 36, 6, 72); }
+        // check stamp
+        const cp = ease(t, ts + .25, ts + .55, E.back);
+        if (cp > 0) withT(-310, y, 0, cp, null, () => {
+          ctx.fillStyle = C.or; ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = C.white; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+          ctx.beginPath(); ctx.moveTo(-12, 1); ctx.lineTo(-3, 10); ctx.lineTo(13, -9); ctx.stroke();
+        });
+      });
+    });
+  }
+}
+
+/* --- Scene 7: WEBSITE – phone mockup assembles --- */
+function sceneWebsite(t) {
+  fillBg(C.or);
+  const t0 = wt(47);
+  // diagonal stripes
+  ctx.save(); ctx.globalAlpha = .08; ctx.fillStyle = C.white;
+  for (let i = -10; i < 20; i++) { const x = i * 140 + (t * 60) % 140; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 50, 0); ctx.lineTo(x + 50 - 600, H); ctx.lineTo(x - 600, H); ctx.fill(); }
+  ctx.restore();
+  label('03', 120, 190, 40, C.white, 'left', 500, 'IN', 6);
+  ctx.fillStyle = C.white; ctx.fillRect(190, 188, ease(t, t0, t0 + .5) * 120, 4);
+  kinetic([[{ s: 'Website', t: t0 }]], W / 2, 400, t, { size: 180, c: C.white });
+  // phone
+  const pp = ease(t, t0 + .1, t0 + .7, E.back);
+  const tilt = (1 - pp) * .5 + Math.sin(t * 1.3) * .02;
+  withT(W / 2, 880 + (1 - pp) * 700, tilt, 1, null, () => {
+    rr(-230, -380, 460, 760, 60); ctx.fillStyle = C.dark; ctx.fill();
+    rr(-208, -358, 416, 716, 44); ctx.fillStyle = C.cream; ctx.fill();
+    ctx.save(); rr(-208, -358, 416, 716, 44); ctx.clip();
+    const parts = [
+      () => { ctx.fillStyle = C.white; ctx.fillRect(-208, -358, 416, 90); if (LOGO) ctx.drawImage(LOGO, -190, -345, 96, 64); ctx.fillStyle = C.grey; [0, 1, 2].forEach(k => ctx.fillRect(140, -330 + k * 14, 40, 6)); },
+      () => { ctx.fillStyle = C.beige; ctx.fillRect(-208, -268, 416, 250); font(40, 'PF', 700); ctx.fillStyle = C.dark; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillText('Du machst die', -180, -180); ctx.fillText('Welt besser.', -180, -132); ctx.fillStyle = C.or; rr(-180, -100, 210, 54, 27); ctx.fill(); label('Kontakt', -75, -72, 24, C.white); },
+      () => { [0, 1, 2].forEach(k => { ctx.fillStyle = C.white; rr(-180 + k * 124, 10, 112, 130, 16); ctx.fill(); ctx.fillStyle = C.or; ctx.beginPath(); ctx.arc(-124 + k * 124, 55, 20, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = C.logo; ctx.fillRect(-160 + k * 124, 95, 72, 8); ctx.fillRect(-160 + k * 124, 112, 50, 8); }); },
+      () => { ctx.fillStyle = C.logo; [0, 1, 2, 3].forEach(k => ctx.fillRect(-180, 175 + k * 30, 360 - (k % 2) * 90, 12)); },
+    ];
+    parts.forEach((fn, i) => {
+      const p = ease(t, t0 + .45 + i * .25, t0 + .9 + i * .25, E.outQ);
+      if (p <= 0) return;
+      ctx.save(); ctx.globalAlpha = p; ctx.translate(0, (1 - p) * 60); fn(); ctx.restore();
+    });
+    // scroll shimmer
+    const sh = ((t - t0) * .8) % 1; ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(-208, -358 + sh * 800, 416, 20);
+    ctx.restore();
+  });
+  // badges
+  const badges = [['barrierefrei', -310, 1320], ['DSGVO-konform', 0, 1400], ['sicher', 310, 1320]];
+  badges.forEach(([b, dx, y], i) => {
+    const p = ease(t, wt(51) + i * .2, wt(51) + i * .2 + .4, E.back);
+    if (p <= 0) return;
+    withT(W / 2 + dx, y, 0, p, null, () => {
+      font(34, 'IN', 500); const w = ctx.measureText(b).width + 100;
+      rr(-w / 2, -38, w, 76, 38); ctx.fillStyle = C.white; ctx.fill();
+      ctx.fillStyle = C.or; ctx.beginPath(); ctx.arc(-w / 2 + 38, 0, 18, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = C.white; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-w / 2 + 30, 0); ctx.lineTo(-w / 2 + 36, 6); ctx.lineTo(-w / 2 + 46, -6); ctx.stroke();
+      label(b, 18, 2, 34, C.dark);
+    });
+  });
+}
+
+/* --- Scene 8: Haltung + Impact: climb the hill, plant the flag --- */
+function sceneImpact(t) {
+  fillBg(C.dark);
+  const t0 = wt(54);
+  // stars
+  for (let i = 0; i < 60; i++) { ctx.fillStyle = `rgba(240,237,233,${.15 + .35 * Math.abs(Math.sin(t * 2 + i))})`; ctx.fillRect(rand(i) * W, rand(i + 50) * 900, 3, 3); }
+  // mountain path draw
+  const pts = [[-40, 1700], [180, 1600], [300, 1640], [470, 1420], [560, 1470], [760, 1160], [840, 1210], [960, 1000]];
+  const dp = ease(t, t0 - .1, wt(60), E.inOut);
+  // mountain fill
+  ctx.fillStyle = '#2A2928'; ctx.beginPath(); ctx.moveTo(-40, H); pts.forEach(([x, y]) => ctx.lineTo(x, y + 40)); ctx.lineTo(1120, 1100); ctx.lineTo(1120, H); ctx.fill();
+  let total = 0; const seg = [];
+  for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(l); total += l; }
+  let rem = total * dp; ctx.strokeStyle = C.or; ctx.lineWidth = 14; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.moveTo(...pts[0]); let head = pts[0];
+  for (let i = 1; i < pts.length && rem > 0; i++) {
+    const f = Math.min(1, rem / seg[i - 1]);
+    head = [lerp(pts[i - 1][0], pts[i][0], f), lerp(pts[i - 1][1], pts[i][1], f)]; ctx.lineTo(...head); rem -= seg[i - 1];
+  }
+  ctx.stroke();
+  ctx.fillStyle = C.cream; ctx.beginPath(); ctx.arc(head[0], head[1], 18 + Math.sin(t * 10) * 3, 0, Math.PI * 2); ctx.fill();
+  // flag at peak
+  const fp = ease(t, wt(60) - .05, wt(60) + .45, E.back);
+  if (fp > 0) {
+    withT(960, 1000, 0, 1, null, () => {
+      ctx.strokeStyle = C.cream; ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -220 * fp); ctx.stroke();
+      ctx.fillStyle = C.or; ctx.beginPath(); ctx.moveTo(0, -220 * fp);
+      for (let k = 0; k <= 10; k++) ctx.lineTo(-k * 16 * fp, -220 * fp + Math.sin(t * 8 - k * .8) * 8 * (k / 10) + k * 0);
+      for (let k = 10; k >= 0; k--) ctx.lineTo(-k * 16 * fp, -130 * fp + Math.sin(t * 8 - k * .8) * 8 * (k / 10));
+      ctx.fill();
+    });
+    // confetti burst
+    for (let i = 0; i < 40; i++) {
+      const k = t - wt(60); if (k < 0 || k > 2) continue;
+      const a = rand(i) * Math.PI * 2, v = 300 + rand(i + 9) * 500;
+      const x = 960 + Math.cos(a) * v * k, y = 860 + Math.sin(a) * v * k + 500 * k * k;
+      ctx.fillStyle = [C.or, C.cream, C.orL][i % 3]; withT(x, y, t * 8 + i, 1, null, () => ctx.fillRect(-8, -4, 16, 8));
+    }
+  }
+  kinetic([
+    [{ s: 'Für', t: wt(54), size: 64, c: C.logo, fam: 'IN', w: 500 }, { s: 'Organisationen', t: wt(55), size: 64, c: C.logo, fam: 'IN', w: 500 }],
+    [{ s: 'mit', t: wt(56), size: 64, c: C.logo, fam: 'IN', w: 500 }, { s: 'Haltung.', t: wt(57), size: 64, c: C.cream, fam: 'IN', w: 500 }],
+  ], W / 2, 230, t, { size: 64, lh: 1.3 });
+  kinetic([
+    [{ s: 'Mach', t: wt(58) }, { s: 'Deinen', t: wt(59) }],
+    [{ s: 'Impact', t: wt(60), c: C.or, it: true, w: 500, size: 190 }],
+    [{ s: 'deutlich.', t: wt(61) }],
+  ], W / 2, 520, t, { size: 120, c: C.cream, lh: 1.25 });
+}
+
+/* --- Scene 9: end card --- */
+function sceneEnd(t) {
+  fillBg(C.beige);
+  const t0 = wt(63) - .3;
+  // brackets climbing in background
+  for (let i = 0; i < 5; i++) {
+    const p = ease(t, t0 + i * .08, t0 + .6 + i * .08, E.outQ);
+    withT(160 + i * 190, 1650 - i * 190 - (1 - p) * 300, 0, 1, null, () => { ctx.globalAlpha = .18 * p; bracket(160, 34, C.or); ctx.globalAlpha = 1; });
+  }
+  const lp = ease(t, t0, t0 + .6, E.back);
+  withT(W / 2, 400, 0, lp, null, () => { if (LOGO) ctx.drawImage(LOGO, -330, -222, 660, 443); });
+  kinetic([
+    [{ s: 'Lass', t: wt(63) }, { s: 'uns', t: wt(64) }],
+    [{ s: 'kennenlernen.', t: wt(65), c: C.or, it: true, w: 500 }],
+  ], W / 2, 790, t, { size: 110, c: C.dark, lh: 1.15 });
+  const bp = ease(t, wt(65) + .4, wt(65) + .9, E.back);
+  if (bp > 0) withT(W / 2, 1060, 0, bp * (1 + Math.sin(t * 6) * .015), null, () => {
+    rr(-330, -54, 660, 108, 54); ctx.fillStyle = C.or; ctx.fill();
+    label('Jetzt Gespräch vereinbaren', 0, 2, 38, C.white);
+  });
+  const up = ease(t, wt(65) + .7, wt(65) + 1.2, E.outQ);
+  ctx.globalAlpha = up;
+  label('uphill-value-marketing.de', W / 2, 1190 + (1 - up) * 20, 44, C.dark, 'center', 500);
+  label('Werte  ·  Worte  ·  Website', W / 2, 1255 + (1 - up) * 20, 32, C.logo, 'center', 400, 'IN', 2);
+  ctx.globalAlpha = 1;
+}
+
+/* ============================================================
+   TIMELINE + TRANSITIONS
+   ============================================================ */
+let SC = null;
+function buildTimeline() {
+  SC = [
+    { a: 0, b: wt(6) - .15, fn: sceneIntro },
+    { a: wt(6) - .15, b: wt(12) - .2, fn: sceneQuestion, tr: 'slide' },
+    { a: wt(12) - .2, b: wt(21) - .15, fn: scenePain, tr: 'glitch' },
+    { a: wt(21) - .15, b: wt(32) - .15, fn: sceneBrand, tr: 'circle' },
+    { a: wt(32) - .15, b: wt(41) - .15, fn: sceneWerte, tr: 'wipeUp' },
+    { a: wt(41) - .15, b: wt(47) - .15, fn: sceneWorte, tr: 'slash' },
+    { a: wt(47) - .15, b: wt(54) - .15, fn: sceneWebsite, tr: 'circle' },
+    { a: wt(54) - .15, b: wt(63) - .45, fn: sceneImpact, tr: 'wipeUp' },
+    { a: wt(63) - .45, b: DUR + 1, fn: sceneEnd, tr: 'bracket' },
+  ];
+}
+const TR = .42;
+function clipFor(type, p) {
+  ctx.beginPath();
+  if (type === 'circle') ctx.arc(W / 2, 1450, E.inOutQ(p) * 2100, 0, Math.PI * 2);
+  else if (type === 'wipeUp') { const y = H - E.inOutQ(p) * (H + 300); ctx.moveTo(0, y + 300); ctx.quadraticCurveTo(W / 2, y - 150, W, y + 300); ctx.lineTo(W, H); ctx.lineTo(0, H); }
+  else if (type === 'slash') { const x = -700 + E.inOutQ(p) * 2600; ctx.moveTo(x - 700, H); ctx.lineTo(x, 0); ctx.lineTo(-800, 0); ctx.lineTo(-800, H); }
+  else if (type === 'slide') { const x = W - E.inOutQ(p) * W; ctx.rect(x, 0, W, H); }
+  else if (type === 'bracket') { const s = E.inOutQ(p) * 2600; ctx.rect(W / 2 - s / 2, 960 - s / 2, s, s); }
+  else ctx.rect(0, 0, W, H);
+}
+// character staging per scene
+function hilliState(t) {
+  const st = { armL: .35, armR: .35, smile: 1, brow: 0, eye: 1, lookX: 0, lookY: 0, tilt: 0 };
+  let x = W / 2, y = 1800, s = .95, vis = 1;
+  const enter = ease(t, .55, 1.0, E.back);
+  y = lerp(2400, 1800, enter);
+  st.squash = spring(t, .95, 2.5, 6) * .08;
+  if (t < wt(6)) { st.armR = lerp(.35, 2.6, ease(t, .6, .9, E.back)) - ease(t, 1.3, 1.7) * 1.6 + Math.sin(t * 16) * .25 * (1 - ease(t, 1.1, 1.4)); st.lookY = -.6; }
+  if (t >= wt(6) - .2 && t < wt(12)) { st.tilt = -.12 * ease(t, wt(6), wt(6) + .4, E.back); st.browUp = 1; st.smile = .2; st.lookX = .8; st.lookY = -.8; st.armL = 1.2; x = W / 2 - 180 * ease(t, wt(6) - .2, wt(6) + .3, E.inOut); }
+  if (t >= wt(12) - .2 && t < wt(21)) { x = W / 2 - 180 + 180 * ease(t, wt(12) - .2, wt(12) + .3, E.inOut); st.smile = -.8; st.brow = -1; st.eye = .85; st.lookY = -.8; s = .88; st.armL = .15; st.armR = .15; if (t > wt(20)) { st.eye = 1.2; st.smile = -1; } }
+  if (t >= wt(21) - .2 && t < wt(32)) { st.smile = 1.2; st.eye = 1.15; st.armR = 2.6 + Math.sin(t * 5) * .15; st.armL = .5; st.lookY = -1; st.squash = spring(t, wt(24), 2.5, 5) * .12; x = W / 2 + 250; }
+  if (t >= wt(32) - .2 && t < wt(41)) { x = lerp(W / 2 + 250, W / 2 - 300, ease(t, wt(32) - .2, wt(32) + .3, E.inOut)); st.armR = 2.2; st.lookX = .9; st.lookY = -.8; s = .8; }
+  if (t >= wt(41) - .2 && t < wt(47)) { x = lerp(W / 2 - 300, W / 2 - 200, ease(t, wt(41) - .2, wt(41) + .3, E.inOut)); st.armL = 1 + Math.sin(t * 4) * .3; st.armR = 2.4; st.lookX = .7; st.lookY = -1; s = .82; st.squash = spring(t, wt(46), 2.5, 5) * .08; }
+  if (t >= wt(47) - .2 && t < wt(54)) { x = lerp(W / 2 - 200, W / 2 + 300, ease(t, wt(47) - .2, wt(47) + .3, E.inOut)); st.armL = 2.3; st.lookX = -.9; st.lookY = -.8; s = .78; }
+  if (t >= wt(54) - .2 && t < wt(63) - .45) { x = lerp(W / 2 + 300, 250, ease(t, wt(54) - .2, wt(54) + .3, E.inOut)); s = .8; st.lookX = 1; st.lookY = -1; st.armR = 1.4; if (t > wt(60) - .1) { const j = ease(t, wt(60) - .1, wt(60) + .2, E.back); st.armL = st.armR = lerp(1.4, 2.9, j); st.squash = spring(t, wt(60), 3, 5) * .15; st.eye = 1.2; st.smile = 1.4; } }
+  if (t >= wt(63) - .45) { x = lerp(250, W / 2, ease(t, wt(63) - .45, wt(63), E.inOut)); s = lerp(.8, .95, ease(t, wt(63) - .45, wt(63))); y = 1780; st.armR = 2.6 + Math.sin(t * 14) * .3; st.smile = 1.3; st.lookY = -.3; st.squash = spring(t, wt(63), 2.5, 5) * .08; }
+  return { x, y, s, st, vis };
+}
+// global camera punches (in on hits)
+const HITS = () => [.42, wt(11), wt(20) + .15, wt(24), wt(30), wt(60), wt(63)];
+
+function drawFrame(t) {
+  ctx.save();
+  // camera
+  let z = 1, sx = 0, sy = 0;
+  HITS().forEach(h => { z += Math.max(0, spring(t, h, 1.2, 7)) * .035; const k = spring(t, h, 13, 12) * 10; sx += k; sy += k * .6; });
+  ctx.translate(W / 2 + sx, H / 2 + sy); ctx.scale(z, z); ctx.translate(-W / 2, -H / 2);
+  // scenes with transitions
+  let cur = SC.findIndex(s => t >= s.a && t < s.b); if (cur < 0) cur = SC.length - 1;
+  const S = SC[cur];
+  const inTr = S.tr && t < S.a + TR && cur > 0;
+  if (inTr) {
+    SC[cur - 1].fn(t);
+    ctx.save(); clipFor(S.tr, (t - S.a) / TR); ctx.clip();
+    S.fn(t);
+    ctx.restore();
+    // glitch transition extra: RGB slices
+    if (S.tr === 'glitch') {
+      const p = (t - S.a) / TR;
+      for (let i = 0; i < 8; i++) { const y = rand(i + Math.floor(t * 30)) * H; ctx.drawImage(buf, 0, y, W, 60, (rand(i * 3 + Math.floor(t * 30)) - .5) * 160 * (1 - p), y, W, 60); }
+    }
+    // accent bar following the transition edge
+    if (S.tr === 'slash' || S.tr === 'wipeUp') {
+      ctx.save(); clipFor(S.tr, Math.min(1, (t - S.a) / TR + .06)); ctx.fillStyle = C.or; ctx.globalAlpha = 1; ctx.fill(); ctx.restore();
+      ctx.save(); clipFor(S.tr, (t - S.a) / TR); ctx.clip(); S.fn(t); ctx.restore();
+    }
+  } else S.fn(t);
+  // character on top
+  const h = hilliState(t);
+  if (t > .5) hilli(h.x, h.y, h.s, t, h.st);
+  ctx.restore();
+  // film finish: vignette + grain
+  const v = ctx.createRadialGradient(W / 2, H / 2, 500, W / 2, H / 2, 1250);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.28)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.drawImage(grains[Math.floor(t * FPS) % grains.length], 0, 0, W, H);
+  ctx.globalCompositeOperation = 'source-over';
+  // final fade out
+  const fo = ease(t, DUR - .5, DUR, E.inOut);
+  if (fo > 0) { ctx.fillStyle = `rgba(28,28,28,${fo})`; ctx.fillRect(0, 0, W, H); }
+}
+
+// motion blur: average N sub-frames across a 180° shutter
+function render(t, samples = 4) {
+  out.globalAlpha = 1; out.clearRect(0, 0, W, H);
+  for (let i = 0; i < samples; i++) {
+    const st = t + (i / samples) * (0.5 / FPS);
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+    drawFrame(st);
+    out.globalAlpha = 1 / (i + 1);
+    out.drawImage(buf, 0, 0);
+  }
+  out.globalAlpha = 1;
+}
+
+async function init() {
+  DATA = await (await fetch('assets/data.json')).json();
+  LOGO = new Image(); LOGO.src = 'assets/logo.svg'; await LOGO.decode();
+  await Promise.all([
+    document.fonts.load('700 100px PF'), document.fonts.load('500 100px PF'), document.fonts.load('italic 500 100px PF'),
+    document.fonts.load('400 40px IN'), document.fonts.load('500 40px IN'),
+  ]);
+  buildTimeline();
+  window.READY = true;
+  if (!location.search.includes('render')) { // live preview
+    const t0 = performance.now();
+    const loop = () => { const t = ((performance.now() - t0) / 1000) % DUR; render(t, 1); requestAnimationFrame(loop); };
+    loop();
+  }
+}
+window.render = render; window.DUR = DUR; window.FPS = FPS;
+init();
+</script>
+</body>
+</html>
